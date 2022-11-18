@@ -1,0 +1,7 @@
+{
+   "total_nodes" :10,
+   "min_vote_req" : 3,
+   "min_confidence_score": 7,
+   "latency": 7,
+   "timeout": 30
+}

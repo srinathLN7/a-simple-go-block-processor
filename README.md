@@ -1,0 +1,27 @@
+# Block processor
+The core logic of our `BlockProcessor` is present in the `src/consensus.go` file. Our `BlockProcessor` first starts with validating the input data from the `*.json` files inside the `data/input` directory. Once the inputs are valid, we start loading the configuration details from the `config.json` file provided all the config parameters are valid. A simple example of an invalid configuration can be setting the `total_nodes` field to be lesser than `min_vote_req` field. 
+
+Once the sanity checks are done, we start retrieving the details of our current blockchain **persisted** in the `data/blockchain.json` file to get the `last_max_accepted_height` value. It is important to note  that the `startHeight` value should always be `last_max_accepted_height+1` and cannot be any random `uint64` value. After this, we start processing the candidate blocks sequentially. To do this, we first declare two globally mutable variables `BLOCK_TOT_VOTE` and `BLOCK_UP_VOTE`, and an unbuffered channel `voteCh` which lets us send and receive the vote values for a particular candidate block between the `nodeService(...)` go routine and the `ProcessBlocks(...)` routine.  For any given block under consideration, we spin up a total of `TOTAL_NODES` number of go routines to simulate the node services validating the blocks. We then block our current `ProcessBlocks` routine and wait until we either receive a response from the `nodeService` go routine or meet the `TIME_OUT` condition. If the minimum vote is acquired before timing out then the block is considered to be valid and appended to our blockchain. However, if the `ProcessBlocks` routine  times out meaning that the minimum vote condition is not met, that block is considered to be invalid and discarded. Since we are dealing with globally mutable variables to keep track of the voute counts, we use `mutex` to prevent any racing conditions among multiple go routines. The `nodeService(...)` go routine is blocked immediately when the `BLOCK_UP_VOTE` value for a particular block equals the `MIN_VOTE_REQ` value (set to `3` in our example) and the control passes back to the `ProcessBlocks(...)` routine. In this way, we ensure efficiency in our solution since we do not wait for the response from the other node instances. We append the validated block to our blockchain, reset the vote values to default and start processing the next block. 
+
+The `TIME_OUT` feature is essential since it ensures that our program will not be met with any deadlock condition and will be concurrency safe. It is important to note that sometimes, our logs will not be in sequential order due to concurrency. If nodes do not upvote a candidate block within a certain duration then that particular block is discarded and the next block is considered, thus guaranteeing the liveness of the system and making sure the blocks are always produced at a regular interval - like a heartbeat. If required, the discarded block can be fed back to our block processor at a later stage, and if the nodes validate it and achieve consensus, the block will be appended to the blockchain. 
+
+
+## Assumptions
+* We assume a minimum of 3 nodes to participate in the consensus process since a minimum of 3 votes are required to upvote and validate the candidate blocks at a given height. 
+* The genesis block is already created and hardcoded in the blockchain. See `data/blockchain.json` file.
+* The method `(p *BlockProcessor) ProcessBlocks(startHeight uint64, blocks []string) uint64` returns an unsigned integer `uint64` which can practically hold values from 0 to ` 2^64-1 (18,446,744,073,709,551,615)`. In other words, our processor can process a maximum of`2^64-1` blocks. However, since we are using the `len` function which returns an `int` (defaulting to `int64` in 64-bit system architecture) inside the `ProcessBlocks` method to return the `last_max_accepted_height`, our `startHeight` value although `uint64`  is assumed to be only between `0` and `2^63-1`. 
+* Validation logic - a proposed block can be upvoted or downvoted by a node according to a arbitary logic. To model this randomness in our system, we choose to generate a random number within a desired range say on a scale `0-10` and consider to upvote the block if the num generated is greater than `min_confidence_score` specified in the `config.json` file. Only then the candidate block will be appended to the blockchain.
+* A static constant delay(specified by the `latency` parameter in the `config.json` file) in seconds is assumed among all `nodeService` go routines. 
+* The `BlockProcessor` validates each candidate block sequentially. It is assumed that the external component calling the block processor has already priortized the candidate blocks based on the selected criterias such as tx fees etc, and has ordered the blocks accordingly. The block processor does not order the candidate blocks and only processes it sequentially i.e. blockId at index 2 cannot be processed before processing (validating or discarding) the blockId at index 1.
+
+
+## Execution
+Code executed and tested on `go version go1.18.4 linux/amd64`. Before running the code rename the `sample.env` file to `.env` and execute the following command in your terminal
+
+```
+go run main.go
+```
+
+If the input, config details, and the environment variables are valid, then you should see our block processor starting to process blocks. For reference, please see the output screenshots in the `img` directory.
+
+
